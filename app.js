@@ -23,6 +23,8 @@ const CONFIG = {
 
 // Application State
 const state = {
+    isHardwareConnected: false,
+    hardwareOfflineTicks: 0,
     motorState: 'STOPPED', // 'RUNNING' | 'STOPPED' | 'CRITICAL'
     controlSource: 'dashboard',
     targetPwm: 0,
@@ -149,11 +151,13 @@ async function fetchTelemetryData() {
             state.runningSeconds++;
         }
 
+        const temp_dht = temp;
+        const temp_ntc = state.motorState === 'STOPPED' ? 0.0 : Number((temp - 1.5 + (Math.random() - 0.5) * 0.4).toFixed(1));
         const power = Number((voltage * current).toFixed(1));
         const efficiency = state.motorState === 'STOPPED' ? 0 : Number((92.5 - (vibration > 2.0 ? 15 : 0)).toFixed(1));
         const torque = state.motorState === 'STOPPED' ? 0 : Number((0.85 + (current - 2.35) * 0.1).toFixed(2));
 
-        return { timestamp: timeLabel, temp, rpm, current, voltage, power, vibration, sound, efficiency, torque };
+        return { timestamp: timeLabel, temp, temp_dht, temp_ntc, rpm, current, voltage, power, vibration, sound, efficiency, torque };
     } 
     
     // Hardware bridge interface (Live ESP32 REST API fetch)
@@ -164,8 +168,12 @@ async function fetchTelemetryData() {
         clearTimeout(timeoutId);
         
         if (res.ok) {
+            state.isHardwareConnected = true;
+            state.hardwareOfflineTicks = 0;
             const esp = await res.json();
-            const temp = Number(parseFloat(esp.temp).toFixed(1));
+            const temp_dht = (esp.temp_dht !== undefined) ? Number(parseFloat(esp.temp_dht).toFixed(1)) : Number(parseFloat(esp.temp || 0).toFixed(1));
+            const temp_ntc = (esp.temp_ntc !== undefined) ? Number(parseFloat(esp.temp_ntc).toFixed(1)) : 0.0;
+            const temp = (temp_dht > 0) ? temp_dht : ((temp_ntc > 0) ? temp_ntc : Number(parseFloat(esp.temp || 0).toFixed(1)));
             const rpm = parseInt(esp.rpm) || 0;
             const current = Number(parseFloat(esp.current).toFixed(2));
             const voltage = Number(parseFloat(esp.voltage).toFixed(1));
@@ -183,9 +191,29 @@ async function fetchTelemetryData() {
                 state.runningSeconds++;
             }
 
-            return { timestamp: timeLabel, temp, rpm, current, voltage, power, vibration, sound, efficiency, torque };
+            return { 
+                timestamp: timeLabel, 
+                temp, 
+                temp_dht, 
+                temp_ntc, 
+                rpm, 
+                current, 
+                voltage, 
+                power, 
+                vibration, 
+                sound, 
+                efficiency, 
+                torque,
+                hasDHT: esp.hasDHT !== undefined ? esp.hasDHT : (temp_dht > 0),
+                hasNTC: esp.hasNTC !== undefined ? esp.hasNTC : (temp_ntc > 0)
+            };
+        } else {
+            state.hardwareOfflineTicks = (state.hardwareOfflineTicks || 0) + 1;
+            state.isHardwareConnected = false;
         }
     } catch (err) {
+        state.hardwareOfflineTicks = (state.hardwareOfflineTicks || 0) + 1;
+        state.isHardwareConnected = false;
         console.warn('ESP32 REST hardware fetch offline:', err);
     }
 
@@ -193,6 +221,8 @@ async function fetchTelemetryData() {
     return { 
         timestamp: timeLabel, 
         temp: 0.0, 
+        temp_dht: 0.0, 
+        temp_ntc: 0.0, 
         rpm: 0, 
         current: 0.0, 
         voltage: 0.0, 
@@ -201,6 +231,8 @@ async function fetchTelemetryData() {
         sound: 0.0, 
         efficiency: 0.0, 
         torque: 0.0,
+        hasDHT: false,
+        hasNTC: false,
         offline: true
     };
 }
@@ -221,6 +253,7 @@ function processTelemetry(data) {
     }
 
     // 3. Update UI Elements
+    updateConnectionHeader();
     updateOverviewCards(data);
     updateSystemStatusPill(health, data);
     updateActiveAlerts(data);
@@ -229,6 +262,11 @@ function processTelemetry(data) {
 }
 
 function computeHealthScore(data) {
+    // If hardware polling fails or disconnected, health cannot be determined
+    if (data.offline || (CONFIG.dataSource !== 'mock' && !state.isHardwareConnected)) {
+        return null;
+    }
+
     if (state.motorState === 'STOPPED') return 100;
 
     let score = 100;
@@ -281,9 +319,111 @@ function safeHTML(id, html) {
 // --------------------------------------------------------------------------
 function updateOverviewCards(d) {
     const b = CONFIG.baselines;
+    const isHardwareOffline = (CONFIG.dataSource !== 'mock' && !state.isHardwareConnected);
+
+    if (isHardwareOffline) {
+        // Values Display in Strict Real Hardware Offline State
+        safeText('val-temp', '--');
+        safeText('val-temp-dht', '--');
+        safeText('val-temp-ntc', 'OFF');
+        safeText('val-rpm', '0');
+        safeText('val-current', '0.00');
+        safeText('val-vibration', '0.00');
+        safeText('val-sound', '0.0');
+
+        safeText('val-power-inline', '(0.0 W)');
+        safeText('val-voltage-inline', '-- V');
+        safeText('val-efficiency', '0.0');
+        safeText('val-torque-display', '0.00 Nm');
+
+        safeText('health-score-display', '--');
+        safeText('sidebar-health-val', 'OFFLINE');
+
+        const healthBar = document.getElementById('sidebar-health-bar');
+        if (healthBar) healthBar.style.width = '0%';
+
+        const rulText = document.getElementById('val-rul-text');
+        if (rulText) {
+            rulText.textContent = 'Hardware Disconnected';
+            rulText.className = 'text-danger';
+        }
+
+        const healthBadge = document.getElementById('health-badge');
+        const riskLevel = document.getElementById('risk-level-display');
+        if (healthBadge && riskLevel) {
+            healthBadge.className = 'badge badge-danger';
+            healthBadge.textContent = 'OFFLINE';
+            riskLevel.className = 'risk-level text-danger';
+            riskLevel.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> ESP32 Disconnected';
+        }
+
+        // Badges for metric cards
+        const tempBadge = document.getElementById('temp-status-badge');
+        if (tempBadge) { tempBadge.className = 'badge badge-neutral'; tempBadge.textContent = 'OFFLINE'; }
+        const devTemp = document.getElementById('dev-temp');
+        if (devTemp) { devTemp.className = 'deviation-pill neutral'; devTemp.innerHTML = '<i class="fa-solid fa-wifi-slash"></i> No Signal'; }
+
+        const rpmBadge = document.getElementById('rpm-status-badge');
+        if (rpmBadge) { rpmBadge.className = 'badge badge-neutral'; rpmBadge.textContent = 'OFFLINE'; }
+        const devRpm = document.getElementById('dev-rpm');
+        if (devRpm) { devRpm.className = 'deviation-pill neutral'; devRpm.innerHTML = '<i class="fa-solid fa-wifi-slash"></i> Offline'; }
+
+        const currBadge = document.getElementById('current-status-badge');
+        if (currBadge) { currBadge.className = 'badge badge-neutral'; currBadge.textContent = 'OFFLINE'; }
+        const devCurr = document.getElementById('dev-current');
+        if (devCurr) { devCurr.className = 'deviation-pill neutral'; devCurr.innerHTML = '<i class="fa-solid fa-wifi-slash"></i> 0.00 A'; }
+
+        const vibBadge = document.getElementById('vibration-status-badge');
+        if (vibBadge) { vibBadge.className = 'badge badge-neutral'; vibBadge.textContent = 'OFFLINE'; }
+        const devVib = document.getElementById('dev-vibration');
+        if (devVib) { devVib.className = 'deviation-pill neutral'; devVib.innerHTML = '<i class="fa-solid fa-wifi-slash"></i> 0.00 g'; }
+
+        const soundBadge = document.getElementById('sound-status-badge');
+        if (soundBadge) { soundBadge.className = 'badge badge-neutral'; soundBadge.textContent = 'OFFLINE'; }
+        const devSound = document.getElementById('dev-sound');
+        if (devSound) { devSound.className = 'deviation-pill neutral'; devSound.innerHTML = '<i class="fa-solid fa-wifi-slash"></i> 0.0 dB'; }
+
+        // Sidebar
+        safeText('sidebar-motor-state', 'OFFLINE');
+        const sidebarState = document.getElementById('sidebar-motor-state');
+        if (sidebarState) sidebarState.style.color = 'var(--danger)';
+        const sidebarDot = document.getElementById('sidebar-motor-dot');
+        if (sidebarDot) sidebarDot.className = 'status-indicator-dot offline';
+        safeHTML('sidebar-control-source', '<i class="fa-solid fa-link-slash text-danger"></i> Source: Disconnected');
+
+        // Sensors tab synchronization
+        safeText('sensor-page-temp', '-- °C');
+        safeText('sensor-page-temp-ntc', 'OFFLINE');
+        safeText('sensor-page-rpm', '0 RPM');
+        safeText('sensor-page-current', '0.00 A');
+        safeText('sensor-page-voltage', '-- V');
+        safeText('sensor-page-power', '0.0 W');
+        safeText('sensor-page-vib', '0.00 g');
+        return;
+    }
 
     // Values Display
     safeText('val-temp', d.temp.toFixed(1));
+    const isStopped = state.motorState === 'STOPPED';
+    const dhtVal = (d.temp_dht !== undefined && d.temp_dht > 0) ? `${d.temp_dht.toFixed(1)}°C` : (d.temp > 0 ? `${d.temp.toFixed(1)}°C` : '--');
+    const ntcVal = (!isStopped && d.temp_ntc !== undefined && d.temp_ntc > 0) ? `${d.temp_ntc.toFixed(1)}°C` : 'OFF';
+    safeText('val-temp-dht', dhtVal);
+    safeText('val-temp-ntc', ntcVal);
+
+    // Dynamic styling for NTC badge
+    const ntcBadgeEl = document.getElementById('badge-temp-ntc');
+    if (ntcBadgeEl) {
+        if (!isStopped && d.temp_ntc > 0) {
+            ntcBadgeEl.style.color = '#fbbf24';
+            ntcBadgeEl.style.borderColor = 'rgba(251, 191, 36, 0.35)';
+            ntcBadgeEl.style.background = 'rgba(251, 191, 36, 0.12)';
+        } else {
+            ntcBadgeEl.style.color = '#94a3b8';
+            ntcBadgeEl.style.borderColor = 'rgba(148, 163, 184, 0.25)';
+            ntcBadgeEl.style.background = 'rgba(148, 163, 184, 0.08)';
+        }
+    }
+
     safeText('val-rpm', d.rpm);
     safeText('val-current', d.current.toFixed(2));
     safeText('val-vibration', d.vibration.toFixed(2));
@@ -342,7 +482,18 @@ function updateOverviewCards(d) {
     }
 
     // Baseline Deviations calculations
-    renderDeviation('dev-temp', 'temp-status-badge', d.temp, b.temp.targetMid, b.temp.warn, '°C');
+    if (isStopped) {
+        const tempBadge = document.getElementById('temp-status-badge');
+        const tempDev = document.getElementById('dev-temp');
+        if (tempBadge && tempDev) {
+            tempBadge.className = 'badge badge-normal';
+            tempBadge.textContent = 'NORMAL';
+            tempDev.className = 'deviation-pill neutral';
+            tempDev.innerHTML = '<i class="fa-solid fa-check"></i> Ambient Room Temp';
+        }
+    } else {
+        renderDeviation('dev-temp', 'temp-status-badge', d.temp, b.temp.targetMid, b.temp.warn, '°C');
+    }
     renderDeviation('dev-current', 'current-status-badge', d.current, b.current.targetMid, b.current.warn, 'A');
     renderDeviation('dev-vibration', 'vibration-status-badge', d.vibration, b.vibration.targetMid, b.vibration.warn, 'g');
     renderDeviation('dev-sound', 'sound-status-badge', d.sound, b.sound.targetMid, b.sound.warn, 'dB');
@@ -371,8 +522,20 @@ function updateOverviewCards(d) {
     }
 
     // Sensors tab synchronization
-    safeText('sensor-page-temp', `${d.temp.toFixed(1)} °C`);
+    safeText('sensor-page-temp', `${dhtVal !== '--' ? dhtVal : (d.temp > 0 ? `${d.temp.toFixed(1)} °C` : '0.0 °C')}`);
+    safeText('sensor-page-temp-ntc', isStopped ? 'OFF' : (d.temp_ntc > 0 ? `${d.temp_ntc.toFixed(1)} °C` : '0.0 °C'));
     if (b.temp && b.temp.warn) safeText('sensor-page-temp-limit', `Max ${b.temp.warn.toFixed(1)} °C`);
+
+    const ntcBadge = document.getElementById('ntc-status-badge');
+    if (ntcBadge) {
+        if (!isStopped && d.temp_ntc > 0) {
+            ntcBadge.className = 'badge badge-normal';
+            ntcBadge.textContent = 'ONLINE';
+        } else {
+            ntcBadge.className = 'badge badge-neutral';
+            ntcBadge.textContent = 'STANDBY';
+        }
+    }
     safeText('sensor-page-rpm', `${d.rpm} RPM`);
     safeText('sensor-page-current', `${d.current.toFixed(2)} A`);
     safeText('sensor-page-voltage', `${d.voltage.toFixed(1)} V`);
@@ -409,16 +572,22 @@ function updateSystemStatusPill(health, d) {
     const statusPill = document.getElementById('system-status-badge');
     const statusText = document.getElementById('system-status-text');
 
+    if (CONFIG.dataSource !== 'mock' && !state.isHardwareConnected) {
+        statusPill.className = 'system-status-pill badge-critical-mode';
+        statusText.innerHTML = '<span class="status-indicator-dot offline"></span> HARDWARE OFFLINE';
+        return;
+    }
+
     if (state.motorState === 'STOPPED') {
         statusPill.className = 'system-status-pill badge-neutral';
-        statusText.textContent = 'MOTOR OFF';
-    } else if (health < 70 || state.faultInjected) {
+        statusText.innerHTML = '<span class="status-indicator-dot offline" style="background:#94a3b8; box-shadow:none;"></span> MOTOR OFF';
+    } else if (health !== null && (health < 70 || state.faultInjected)) {
         statusPill.className = 'system-status-pill badge-critical-mode';
-        statusText.textContent = 'ANOMALY DETECTED';
+        statusText.innerHTML = '<span class="status-indicator-dot offline"></span> ANOMALY DETECTED';
         triggerAudioAlert();
     } else {
         statusPill.className = 'system-status-pill badge-healthy';
-        statusText.textContent = 'SYSTEM NORMAL';
+        statusText.innerHTML = '<span class="status-indicator-dot online"></span> SYSTEM NORMAL';
     }
 }
 
@@ -436,7 +605,21 @@ function updateActiveAlerts(d) {
 
     const activeAlerts = [];
 
-    // 1. Temperature Persistence & Hysteresis Check
+    // Hardware Offline Critical Notice
+    if (CONFIG.dataSource !== 'mock' && !state.isHardwareConnected) {
+        badgeCount.textContent = '1 Alert';
+        alertsContainer.innerHTML = `
+            <div class="alert-item danger-alert">
+                <i class="fa-solid fa-wifi-slash text-danger" style="font-size: 20px; margin-top: 2px;"></i>
+                <div class="alert-content">
+                    <h5>ESP32 Hardware Disconnected</h5>
+                    <p>Cannot communicate with ESP32 board at <code>http://192.168.4.1</code>. Connect your device to Wi-Fi <strong>MotoSafe_ESP32_AP</strong> (password: <code>motosafe_pass</code>) or switch to Simulated Mode.</p>
+                    <div class="alert-time">${d.timestamp || new Date().toTimeString().split(' ')[0]}</div>
+                </div>
+            </div>
+        `;
+        return;
+    }
     const tempClearThresh = b.temp.warn - 2.0; // Hysteresis clear band
     if (d.temp > b.temp.warn || state.faultInjected === 'temp') {
         persistenceState.counters.temp++;
@@ -513,7 +696,7 @@ function updateActiveAlerts(d) {
 
     alertsContainer.innerHTML = activeAlerts.map(a => `
         <div class="alert-item ${a.type}">
-            <i class="fa-solid ${a.icon} style="font-size: 18px; margin-top: 2px;"></i>
+            <i class="fa-solid ${a.icon}" style="font-size: 18px; margin-top: 2px;"></i>
             <div class="alert-content">
                 <h5>${a.title}</h5>
                 <p>${a.msg}</p>
@@ -679,6 +862,34 @@ function initControlEventListeners() {
     // Export CSV & Printable Report
     document.getElementById('btn-export-csv').addEventListener('click', exportCsvLog);
     document.getElementById('btn-generate-report').addEventListener('click', () => window.print());
+
+    // Hardware Offline Protection Modal Listeners
+    const btnCloseModal = document.getElementById('btn-close-offline-modal');
+    if (btnCloseModal) {
+        btnCloseModal.addEventListener('click', () => {
+            const modal = document.getElementById('offline-alert-modal');
+            if (modal) modal.style.display = 'none';
+        });
+    }
+
+    const btnSwitchSim = document.getElementById('btn-switch-to-simulation');
+    if (btnSwitchSim) {
+        btnSwitchSim.addEventListener('click', () => {
+            const modal = document.getElementById('offline-alert-modal');
+            if (modal) modal.style.display = 'none';
+            setDataSource('mock');
+            setMotorState('RUNNING');
+        });
+    }
+
+    const offlineModal = document.getElementById('offline-alert-modal');
+    if (offlineModal) {
+        offlineModal.addEventListener('click', (e) => {
+            if (e.target === offlineModal) {
+                offlineModal.style.display = 'none';
+            }
+        });
+    }
 }
 
 function saveCustomThresholds() {
@@ -731,6 +942,15 @@ function loadSavedThresholds() {
 }
 
 function setMotorState(newState) {
+    if (newState === 'RUNNING' && CONFIG.dataSource !== 'mock' && !state.isHardwareConnected) {
+        const toggleSwitch = document.getElementById('toggle-motor-state');
+        if (toggleSwitch) toggleSwitch.checked = false;
+        const modal = document.getElementById('offline-alert-modal');
+        if (modal) modal.style.display = 'flex';
+        logEvent('WARN', 'Motor Safety Guard', 'BLOCKED', 'Hardware Offline', 'Safety Interlock Engaged');
+        return;
+    }
+
     state.motorState = newState;
     const isRunning = newState === 'RUNNING';
 
@@ -746,7 +966,31 @@ function setMotorState(newState) {
         body: JSON.stringify({ state: newState, pwm: state.targetPwm })
     }).catch(err => console.warn('Backend control sync:', err));
 
+    // Direct sync to ESP32 Hardware REST API
+    if (CONFIG.dataSource === 'rest') {
+        fetch('http://192.168.4.1/api/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: newState, pwm: state.targetPwm })
+        }).catch(err => console.warn('Direct ESP32 REST control sync:', err));
+    }
+
     logEvent(isRunning ? 'INFO' : 'WARN', 'Motor Relay State', isRunning ? 'RUNNING' : 'STOPPED', 'Remote Toggle', 'Success');
+}
+
+function updateConnectionHeader() {
+    const connIndicator = document.getElementById('connection-indicator');
+    if (!connIndicator) return;
+
+    if (CONFIG.dataSource === 'mock') {
+        connIndicator.innerHTML = '<i class="fa-solid fa-flask" style="color: #60a5fa;"></i> <span id="data-source-label">Mode: Simulated ESP32</span>';
+    } else {
+        if (state.isHardwareConnected) {
+            connIndicator.innerHTML = `<i class="fa-solid fa-circle-check text-success"></i> <span id="data-source-label" class="text-success">ESP32 Live (${CONFIG.dataSource.toUpperCase()})</span>`;
+        } else {
+            connIndicator.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-danger" style="animation: pulse 1.5s infinite;"></i> <span id="data-source-label" class="text-danger">ESP32 Offline (No Signal)</span>`;
+        }
+    }
 }
 
 function injectFault(type, description) {
@@ -754,35 +998,22 @@ function injectFault(type, description) {
     logEvent('WARN', 'Demo Fault Injector', type.toUpperCase(), description, 'Active Fault');
 }
 
-
 function loadSavedDataSource() {
     const saved = localStorage.getItem('motosafe_data_source');
-    if (!saved) return;
-    // Update config
-    CONFIG.dataSource = saved;
-    // Update select dropdown if present
-    const modeSelect = document.getElementById('select-data-mode');
-    if (modeSelect) modeSelect.value = saved;
-    // Update UI label
-    const label = document.getElementById('data-source-label');
-    if (label) {
-        if (saved === 'mock') {
-            label.textContent = 'Data Mode: Simulated ESP32';
-        } else {
-            label.textContent = `Data Mode: ESP32 Hardware (${saved.toUpperCase()})`;
-        }
+    if (saved) {
+        CONFIG.dataSource = saved;
+        const modeSelect = document.getElementById('select-data-mode');
+        if (modeSelect) modeSelect.value = saved;
     }
+    updateConnectionHeader();
 }
 
 function setDataSource(mode) {
     CONFIG.dataSource = mode;
     localStorage.setItem('motosafe_data_source', mode);
-    const label = document.getElementById('data-source-label');
-    if (mode === 'mock') {
-        label.textContent = 'Data Mode: Simulated ESP32';
-    } else {
-        label.textContent = `Data Mode: ESP32 Hardware (${mode.toUpperCase()})`;
-    }
+    const modeSelect = document.getElementById('select-data-mode');
+    if (modeSelect) modeSelect.value = mode;
+    updateConnectionHeader();
 }
 
 function logEvent(type, param, val, limit, status) {

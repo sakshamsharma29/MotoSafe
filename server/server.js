@@ -22,6 +22,8 @@ app.use(express.json());
 const mqttService = new MotoSafeMQTTClient((mqttPayload) => {
     // Received telemetry via MQTT from ESP32
     if (mqttPayload.temp !== undefined) latestTelemetry.temp = parseFloat(mqttPayload.temp);
+    if (mqttPayload.temp_dht !== undefined) latestTelemetry.temp_dht = parseFloat(mqttPayload.temp_dht);
+    if (mqttPayload.temp_ntc !== undefined) latestTelemetry.temp_ntc = parseFloat(mqttPayload.temp_ntc);
     if (mqttPayload.rpm !== undefined) latestTelemetry.rpm = parseInt(mqttPayload.rpm);
     if (mqttPayload.current !== undefined) latestTelemetry.current = parseFloat(mqttPayload.current);
     if (mqttPayload.voltage !== undefined) latestTelemetry.voltage = parseFloat(mqttPayload.voltage);
@@ -66,6 +68,8 @@ if (fs.existsSync(DB_FILE)) {
 let latestTelemetry = {
     timestamp: new Date().toTimeString().split(' ')[0],
     temp: 0.0,
+    temp_dht: 0.0,
+    temp_ntc: 0.0,
     rpm: 0,
     current: 0.0,
     voltage: 0.0,
@@ -94,6 +98,8 @@ function generateMockPoint() {
 
     if (motorState === 'STOPPED') {
         latestTelemetry.temp = Math.max(25.0, Number((latestTelemetry.temp - 0.2).toFixed(1)));
+        latestTelemetry.temp_dht = latestTelemetry.temp;
+        latestTelemetry.temp_ntc = 0.0;
         latestTelemetry.rpm = 0;
         latestTelemetry.current = Number((0.05 + Math.random() * 0.02).toFixed(2));
         latestTelemetry.vibration = Number((0.10 + Math.random() * 0.05).toFixed(2));
@@ -101,6 +107,8 @@ function generateMockPoint() {
     } else {
         latestTelemetry.rpm = Math.round(BASELINES.rpmMid * (targetPwm / 100) + noise() * 12);
         latestTelemetry.temp = Number((36.5 + noise() * 0.4).toFixed(1));
+        latestTelemetry.temp_dht = latestTelemetry.temp;
+        latestTelemetry.temp_ntc = Number((latestTelemetry.temp - 1.2 + noise() * 0.3).toFixed(1));
         latestTelemetry.current = Number((2.35 + noise() * 0.08).toFixed(2));
         latestTelemetry.voltage = Number((12.1 + noise() * 0.1).toFixed(1));
         latestTelemetry.vibration = Number((1.45 + noise() * 0.06).toFixed(2));
@@ -177,6 +185,14 @@ app.post('/api/control', (req, res) => {
 
     // Publish MQTT control command to ESP32
     mqttService.publishControlCommand('MOTOR-01', motorState, targetPwm);
+
+    // Direct HTTP bridge to ESP32 Access Point if connected
+    fetch('http://192.168.4.1/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: motorState, pwm: targetPwm }),
+        signal: AbortSignal.timeout(1000)
+    }).catch(() => {});
 
     eventLogs.unshift({
         id: Date.now(),

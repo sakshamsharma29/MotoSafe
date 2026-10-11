@@ -7,9 +7,10 @@
  *   - MOSFET Motor Driver PWM   : GPIO 25 (LEDC 5kHz Output -> Motor Gate)
  *   - INA219 (Voltage & Current): I2C SDA -> GPIO 21, SCL -> GPIO 22 (Address 0x24 / 0x40)
  *   - MPU6050 (Vibration)       : I2C SDA -> GPIO 21, SCL -> GPIO 22 (Address 0x68)
- *   - NTC Thermistor Temp Pin   : GPIO 34 (ADC1 Input)
- *   - Sound/Microphone Sensor   : GPIO 32 (ADC1 Input)
- *   - 2-Terminal Rig Switch     : GPIO 27 (Input Pullup)
+ *   - DHT22 Temp Sensor         : GPIO 4 (Digital 1-Wire Input)
+ *   - NTC Thermistor Temp Sensor: GPIO 34 (ADC1 Analog Input)
+ *   - Sound/Microphone Sensor   : GPIO 35 (ADC1 Input)
+ *   - RPM Proximity Pulse Sensor: GPIO 27 (Input Pullup Interrupt)
  *   - Status LED Indicator      : GPIO 2 (Built-in LED)
  * ============================================================================
  */
@@ -20,6 +21,7 @@
 #include <PubSubClient.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <DHT.h>
 
 const char* ssid         = "MotoSafe_ESP32_AP";
 const char* password     = "motosafe_pass";
@@ -32,8 +34,13 @@ WebServer server(80);
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
+// Sensor Pins
+#define DHTPIN 4          // GPIO 4 connected to DHT22 DATA pin
+#define DHTTYPE DHT22     // DHT22 digital sensor module
+DHT dht(DHTPIN, DHTTYPE);
+
 // Pin Definitions
-const int PIN_NTC_TEMP        = 34; // NTC Thermistor analog input
+const int PIN_NTC_TEMP        = 34; // NTC Thermistor temp sensor (GPIO 34 ADC1)
 const int PIN_SOUND           = 35; // Sound/microphone analog input (GPIO 35)
 const int PIN_MOSFET_PWM      = 25; // MOSFET motor PWM power pin (GPIO 25)
 const int PIN_RPM_SENSOR      = 27; // Tachometer Proximity Pulse Sensor (GPIO 27)
@@ -55,7 +62,7 @@ const int PWM_RESOLUTION = 8;    // 8-bit resolution (0-255)
 
 // Hardware State Variables
 unsigned long lastMqttPubTime = 0;
-String activeControlSource = "HARDWARE_RIG_SWITCH";
+String activeControlSource = "WEB_DASHBOARD";
 bool lastPhysicalSwitchState = HIGH;
 bool motorIsOn = false;
 int targetPwmPercent = 0;
@@ -156,14 +163,35 @@ void initLCD() {
   Serial.println("ℹ️ I2C LCD Display not detected on I2C bus.");
 }
 
-void updateLCDDisplay(float temp, int rpm, float current) {
+void updateLCDDisplay(float tempDHT, float tempNTC, int rpm, float current) {
   if (!hasLCD) return;
   lcd.setCursor(0, 0);
   lcd.print("RPM:");
   lcd.print(rpm);
-  lcd.print(" T:");
-  lcd.print(temp, 1);
-  lcd.print("C   ");
+
+  if (!motorIsOn) {
+    lcd.print(" T:");
+    lcd.print(tempDHT > 0.0 ? tempDHT : tempNTC, 1);
+    lcd.print("C  ");
+  } else {
+    // Alternate displaying DHT22 (D) and NTC (N) on LCD when motor runs
+    static unsigned long lastLcdFlip = 0;
+    static bool showNTC = false;
+    if (millis() - lastLcdFlip > 2500) {
+      lastLcdFlip = millis();
+      showNTC = !showNTC;
+    }
+
+    if (showNTC && tempNTC > 0.0) {
+      lcd.print(" N:");
+      lcd.print(tempNTC, 1);
+      lcd.print("C  ");
+    } else {
+      lcd.print(" D:");
+      lcd.print(tempDHT, 1);
+      lcd.print("C  ");
+    }
+  }
 
   lcd.setCursor(0, 1);
   lcd.print("I:");
@@ -176,15 +204,45 @@ void updateLCDDisplay(float temp, int rpm, float current) {
 // Real Hardware Sensor Read Functions (Strict Real-Time - Zero Mock Data)
 // --------------------------------------------------------------------------
 
-// 1. Temperature Read (NTC Thermistor / Analog Temp on GPIO 34)
-float readTemperature() {
-  int rawADC = analogRead(PIN_NTC_TEMP);
-  if (rawADC <= 5) {
-    return 0.0; // Sensor disconnected / Not found
+// 1a. Temperature Read: DHT22 Digital Sensor on GPIO 4
+float readTemperatureDHT() {
+  float temp = dht.readTemperature();
+  if (isnan(temp)) {
+    return 0.0; // Sensor disconnected / reading failed
   }
+  return temp;
+}
+
+// 1b. Temperature Read: NTC Thermistor Analog Sensor on GPIO 34
+float readTemperatureNTC() {
+  int rawADC = analogRead(PIN_NTC_TEMP);
+  if (rawADC <= 50 || rawADC >= 4050) {
+    return 0.0; // NTC disconnected or floating
+  }
+
+  // Standard 10k NTC with 10k fixed resistor (Beta 3950 Steinhart-Hart equation)
   float voltage = (rawADC / 4095.0) * 3.3;
-  float tempC = 25.0 + (voltage / 3.3) * 35.0;
+  if (voltage >= 3.29 || voltage <= 0.01) return 0.0;
+
+  float rNtc = 10000.0 * (voltage / (3.3 - voltage));
+  if (rNtc <= 0.0) return 0.0;
+
+  float steinhart = rNtc / 10000.0;            // (R/Ro)
+  steinhart = log(steinhart);                  // ln(R/Ro)
+  steinhart /= 3950.0;                         // 1/B * ln(R/Ro)
+  steinhart += 1.0 / (25.0 + 273.15);          // + (1/To)
+  steinhart = 1.0 / steinhart;                 // Invert
+  float tempC = steinhart - 273.15;            // Convert to Celsius
+
+  if (tempC < 0.0 || tempC > 120.0) return 0.0;
   return tempC;
+}
+
+// 1c. Primary Temperature (DHT22 priority, fallback to NTC)
+float readTemperature() {
+  float dhtT = readTemperatureDHT();
+  if (dhtT > 0.0) return dhtT;
+  return readTemperatureNTC();
 }
 
 // 2. Voltage Read (INA219 Bus Voltage)
@@ -223,10 +281,8 @@ float readCurrent() {
   return 0.0; // INA219 Not Connected
 }
 
-// 4. Vibration Read (MPU6050 3-Axis Accelerometer RMS G-Force)
+// 4. Vibration Read (MPU6050 3-Axis Accelerometer RMS Dynamic G-Force)
 float readVibration() {
-  if (!motorIsOn) return 0.0; // Motor stopped
-
   if (hasMPU6050 && activeMpuAddr != 0) {
     Wire.beginTransmission(activeMpuAddr);
     Wire.write(0x3B); // Accel Xout H register
@@ -241,15 +297,17 @@ float readVibration() {
         float gY = ay / 16384.0;
         float gZ = az / 16384.0;
 
-        float gRms = sqrt(gX * gX + gY * gY + gZ * gZ);
-        return gRms;
+        float totalG = sqrt(gX * gX + gY * gY + gZ * gZ);
+        // Net dynamic vibration (deviation from static 1.0g earth gravity)
+        float dynamicVib = fabs(totalG - 1.0);
+        return dynamicVib;
       }
     }
   }
   return 0.0; // MPU6050 Not Connected
 }
 
-// 5. Sound / Acoustic Read (Sound Sensor module on GPIO 32)
+// 5. Sound / Acoustic Read (Sound Sensor module on GPIO 35)
 float readSound() {
   int rawADC = analogRead(PIN_SOUND);
   if (rawADC <= 5) {
@@ -259,10 +317,8 @@ float readSound() {
   return soundDb;
 }
 
-// 6. Motor Speed (Real RPM from proximity pulse sensor on GPIO 18)
+// 6. Motor Speed (Real RPM from proximity pulse sensor on GPIO 27)
 int calculateRPM() {
-  if (!motorIsOn) return 0;
-
   unsigned long now = millis();
   unsigned long elapsed = now - lastRpmCalcTime;
 
@@ -288,10 +344,15 @@ void publishMQTTTelemetry() {
   float current  = readCurrent();
   float voltage  = readVoltage();
   float power    = current * voltage;
+  float tempDHT  = readTemperatureDHT();
+  float tempNTC  = readTemperatureNTC();
+  float mainTemp = (tempDHT > 0.0) ? tempDHT : tempNTC;
 
   StaticJsonDocument<512> doc;
   doc["motorId"]       = "MOTOR-01";
-  doc["temp"]          = readTemperature();
+  doc["temp"]          = mainTemp;
+  doc["temp_dht"]      = tempDHT;
+  doc["temp_ntc"]      = tempNTC;
   doc["rpm"]           = calculateRPM();
   doc["current"]       = current;
   doc["voltage"]       = voltage;
@@ -304,6 +365,7 @@ void publishMQTTTelemetry() {
   // Real Hardware Detection Status Flags
   doc["hasINA219"]  = hasINA219;
   doc["hasMPU6050"] = hasMPU6050;
+  doc["hasDHT"]     = (tempDHT > 0.0);
   doc["hasNTC"]     = (analogRead(PIN_NTC_TEMP) > 5);
   doc["hasSound"]   = (analogRead(PIN_SOUND) > 5);
 
@@ -317,10 +379,15 @@ void handleTelemetry() {
   float current  = readCurrent();
   float voltage  = readVoltage();
   float power    = current * voltage;
+  float tempDHT  = readTemperatureDHT();
+  float tempNTC  = readTemperatureNTC();
+  float mainTemp = (tempDHT > 0.0) ? tempDHT : tempNTC;
 
   StaticJsonDocument<512> doc;
   doc["motorId"]       = "MOTOR-01";
-  doc["temp"]          = readTemperature();
+  doc["temp"]          = mainTemp;
+  doc["temp_dht"]      = tempDHT;
+  doc["temp_ntc"]      = tempNTC;
   doc["rpm"]           = calculateRPM();
   doc["current"]       = current;
   doc["voltage"]       = voltage;
@@ -333,10 +400,11 @@ void handleTelemetry() {
   // Real Hardware Detection Status Flags
   doc["hasINA219"]  = hasINA219;
   doc["hasMPU6050"] = hasMPU6050;
+  doc["hasDHT"]     = (tempDHT > 0.0);
   doc["hasNTC"]     = (analogRead(PIN_NTC_TEMP) > 5);
   doc["hasSound"]   = (analogRead(PIN_SOUND) > 5);
 
-  updateLCDDisplay(doc["temp"].as<float>(), doc["rpm"].as<int>(), current);
+  updateLCDDisplay(tempDHT, tempNTC, doc["rpm"].as<int>(), current);
 
   String jsonResponse;
   serializeJson(doc, jsonResponse);
@@ -399,23 +467,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   }
 }
 
-void checkPhysicalSwitchState() {
-  bool currentSwitchState = digitalRead(PIN_PHYSICAL_SWITCH);
-  if (currentSwitchState != lastPhysicalSwitchState) {
-    delay(50);
-    currentSwitchState = digitalRead(PIN_PHYSICAL_SWITCH);
-    if (currentSwitchState != lastPhysicalSwitchState) {
-      lastPhysicalSwitchState = currentSwitchState;
-      activeControlSource = "HARDWARE_RIG_SWITCH";
-
-      bool motorPowerOn = (currentSwitchState == LOW);
-      setMotorPower(motorPowerOn);
-
-      publishMQTTTelemetry();
-    }
-  }
-}
-
 // --------------------------------------------------------------------------
 // Arduino Setup & Main Loop
 // --------------------------------------------------------------------------
@@ -444,9 +495,8 @@ void setup() {
 
   // 3. Configure Hardware Pins & MOSFET Motor Driver
   pinMode(PIN_STATUS_LED, OUTPUT);
-  pinMode(PIN_PHYSICAL_SWITCH, INPUT_PULLUP);
 
-  // Configure RPM Proximity Sensor Pin & Hardware Interrupt (GPIO 18)
+  // Configure RPM Proximity Sensor Pin & Hardware Interrupt (GPIO 27)
   pinMode(PIN_RPM_SENSOR, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_RPM_SENSOR), rpmPulseISR, FALLING);
 
@@ -457,6 +507,10 @@ void setup() {
   // Default Motor State to STOPPED on Boot (Controlled via Web Dashboard / REST / MQTT)
   activeControlSource = "WEB_DASHBOARD";
   setMotorPower(false, 95);
+
+  // Initialize DHT22 Sensor on GPIO 4
+  dht.begin();
+  Serial.println("✅ DHT22 Sensor Initialized on GPIO 4");
 
   // 4. Safe I2C Bus Hardware Initialization (GPIO 21 SDA, GPIO 22 SCL)
   Wire.begin(21, 22);
