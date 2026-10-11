@@ -1,0 +1,15 @@
+{
+  "name": "motosafe-backend",
+  "version": "1.0.0",
+  "description": "MotoSafe Motor Health Monitoring System Backend API & Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "mqtt": "^5.16.0",
+    "ws": "^8.16.0"
+  }
+}

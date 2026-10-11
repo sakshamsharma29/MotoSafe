@@ -1,0 +1,16 @@
+{
+  "name": "motosafe-platform",
+  "version": "1.0.0",
+  "description": "MotoSafe Motor Health Monitoring System Platform",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "build": "cd server && npm install"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "mqtt": "^5.16.0",
+    "ws": "^8.16.0"
+  }
+}

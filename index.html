@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MotoSafe — Motor Health & Condition Monitoring System</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-theme">
+    <!-- Top Header Navigation -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="brand-logo">
+                <i class="fa-solid fa-shield-halved brand-icon"></i>
+                <div class="brand-text">
+                    <span class="brand-name">MotoSafe</span>
+                    <span class="brand-tagline">Motor Condition Monitoring</span>
+                </div>
+            </div>
+            <div class="system-status-pill badge-healthy" id="system-status-badge">
+                <span class="pulse-dot"></span>
+                <span id="system-status-text">SYSTEM NORMAL</span>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div class="connection-status" id="connection-indicator">
+                <i class="fa-solid fa-wifi"></i>
+                <span id="data-source-label">Data Mode: Simulated ESP32</span>
+            </div>
+            <div class="header-clock" id="live-clock">00:00:00</div>
+            <button class="btn btn-outline btn-sm" id="btn-toggle-audio" title="Toggle Sound Alarms for Anomaly Alerts">
+                <i class="fa-solid fa-volume-xmark" id="audio-icon"></i> Audio Off
+            </button>
+            <button class="btn btn-outline btn-sm" id="btn-toggle-source" title="Switch between Mock Simulation and Hardware API">
+                <i class="fa-solid fa-sliders"></i> Mode
+            </button>
+            <button class="btn btn-primary btn-sm" id="btn-user-profile" title="Switch Role / Login">
+                <i class="fa-solid fa-user-shield"></i> <span id="current-user-role">Role: Admin</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="overview">
+                    <i class="fa-solid fa-gauge-high"></i>
+                    <span>Overview</span>
+                </button>
+                <button class="nav-item" data-tab="sensors">
+                    <i class="fa-solid fa-microchip"></i>
+                    <span>Live Sensors</span>
+                </button>
+                <button class="nav-item" data-tab="analytics">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Analytics</span>
+                </button>
+                <button class="nav-item" data-tab="control">
+                    <i class="fa-solid fa-power-off"></i>
+                    <span>Motor Control</span>
+                </button>
+                <button class="nav-item" data-tab="firmware">
+                    <i class="fa-solid fa-code"></i>
+                    <span>ESP32 Firmware</span>
+                </button>
+                <button class="nav-item" data-tab="maintenance">
+                    <i class="fa-solid fa-wrench"></i>
+                    <span>Maintenance & Logs</span>
+                </button>
+            </nav>
+
+            <!-- Quick Motor Summary Widget -->
+            <div class="sidebar-summary-card">
+                <div class="card-header-sm">
+                    <span>Motor Status</span>
+                    <span class="status-indicator-dot online" id="sidebar-motor-dot"></span>
+                </div>
+                <div class="summary-stat">
+                    <div class="stat-main" id="sidebar-motor-state">RUNNING</div>
+                    <div class="stat-sub" id="sidebar-motor-id">ID: MOTOR-ESP32-01</div>
+                    <div class="stat-sub text-info" id="sidebar-control-source" style="margin-top: 2px;"><i class="fa-solid fa-gamepad"></i> Source: Dashboard</div>
+                </div>
+                <div class="health-progress-wrap">
+                    <div class="progress-labels">
+                        <span>Health Index</span>
+                        <span id="sidebar-health-val">94/100</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill green" id="sidebar-health-bar" style="width: 94%;"></div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content View Area -->
+        <main class="main-content">
+            
+            <!-- SECTION 1: OVERVIEW TAB -->
+            <section id="tab-overview" class="tab-page active">
+                <div class="section-title-row">
+                    <div>
+                        <h2>Motor Condition Dashboard</h2>
+                        <p class="section-desc">Real-time telemetric health scores, baseline deviations & status warnings.</p>
+                    </div>
+                    <div class="quick-action-btns">
+                        <button class="btn btn-danger" id="btn-quick-stop"><i class="fa-solid fa-circle-stop"></i> Emergency Stop</button>
+                        <button class="btn btn-success" id="btn-quick-start"><i class="fa-solid fa-play"></i> Start Motor</button>
+                    </div>
+                </div>
+
+                <!-- Top Metric Cards Grid -->
+                <div class="metrics-grid">
+                    <!-- Health Score Card -->
+                    <div class="metric-card card-highlight">
+                        <div class="card-header-flex">
+                            <span class="card-label"><i class="fa-solid fa-heart-pulse text-danger"></i> Health Score</span>
+                            <span class="badge badge-normal" id="health-badge">EXCELLENT</span>
+                        </div>
+                        <div class="card-body-flex">
+                            <div class="big-score" id="health-score-display">94</div>
+                            <div class="score-meta">
+                                <span class="score-max">/ 100</span>
+                                <div class="risk-level text-success" id="risk-level-display"><i class="fa-solid fa-shield-check"></i> Low Risk</div>
+                            </div>
+                        </div>
+                        <div class="card-footer-info">
+                            <span>RUL Est: <strong id="val-rul-text" class="text-success">98% (420 hrs)</strong></span>
+                        </div>
+                    </div>
+
+                    <!-- Temperature Card -->
+                    <div class="metric-card" id="card-temp">
+                        <div class="card-header-flex">
+                            <span class="card-label"><i class="fa-solid fa-temperature-half text-warning"></i> Temperature</span>
+                            <span class="badge badge-normal" id="temp-status-badge">NORMAL</span>
+                        </div>
+                        <div class="metric-value-wrap">
+                            <span class="metric-val" id="val-temp">36.5</span>
+                            <span class="metric-unit">°C</span>
+                        </div>
+                        <div class="baseline-comparison">
+                            <div class="baseline-text">Normal: <span id="disp-temp-baseline">30.0 – 40.0 °C</span></div>
+                            <div class="deviation-pill neutral" id="dev-temp"><i class="fa-solid fa-arrows-left-right"></i> +4% vs baseline</div>
+                        </div>
+                    </div>
+
+                    <!-- Speed Card (RPM) -->
+                    <div class="metric-card" id="card-rpm">
+                        <div class="card-header-flex">
+                            <span class="card-label"><i class="fa-solid fa-rotate text-info"></i> Motor Speed</span>
+                            <span class="badge badge-normal" id="rpm-status-badge">NORMAL</span>
+                        </div>
+                        <div class="metric-value-wrap">
+                            <span class="metric-val" id="val-rpm">1450</span>
+                            <span class="metric-unit">RPM</span>
+                        </div>
+                        <div class="baseline-comparison">
+                            <div class="baseline-text">Expected: <span id="disp-rpm-baseline">1400 – 1500 RPM</span></div>
+                            <div class="deviation-pill neutral" id="dev-rpm"><i class="fa-solid fa-check"></i> Optimal</div>
+                        </div>
+                    </div>
+
+                    <!-- Current Card -->
+                    <div class="metric-card" id="card-current">
+                        <div class="card-header-flex">
+                            <span class="card-label"><i class="fa-solid fa-bolt text-warning"></i> Current & Power</span>
+                            <span class="badge badge-normal" id="current-status-badge">NORMAL</span>
+                        </div>
+                        <div class="metric-value-wrap">
+                            <span class="metric-val" id="val-current">2.35</span>
+                            <span class="metric-unit">A</span>
+                            <span class="metric-unit" style="margin-left: 8px;" id="val-power-inline">(28.4 W)</span>
+                        </div>
+                        <div class="baseline-comparison">
+                            <div class="baseline-text">Supply Volts: <span id="val-voltage-inline">12.1 V DC</span></div>
+                            <div class="deviation-pill neutral" id="dev-current"><i class="fa-solid fa-equals"></i> Within Range</div>
+                        </div>
+                    </div>
+
+                    <!-- Vibration Card -->
+                    <div class="metric-card" id="card-vibration">
+                        <div class="card-header-flex">
+                            <span class="card-label"><i class="fa-solid fa-wave-square text-purple"></i> Vibration</span>
+                            <span class="badge badge-normal" id="vibration-status-badge">NORMAL</span>
+                        </div>
+                        <div class="metric-value-wrap">
+                            <span class="metric-val" id="val-vibration">1.45</span>
+                            <span class="metric-unit">g RMS</span>
+                        </div>
+                        <div class="baseline-comparison">
+                            <div class="baseline-text">Baseline: <span id="disp-vib-baseline">1.0 – 1.8 g</span></div>
+                            <div class="deviation-pill neutral" id="dev-vibration"><i class="fa-solid fa-check"></i> Normal</div>
+                        </div>
+                    </div>
+
+                    <!-- Sound Card -->
+                    <div class="metric-card" id="card-sound">
+                        <div class="card-header-flex">
+                            <span class="card-label"><i class="fa-solid fa-volume-high text-cyan"></i> Acoustic Level</span>
+                            <span class="badge badge-normal" id="sound-status-badge">NORMAL</span>
+                        </div>
+                        <div class="metric-value-wrap">
+                            <span class="metric-val" id="val-sound">38.2</span>
+                            <span class="metric-unit">dB</span>
+                        </div>
+                        <div class="baseline-comparison">
+                            <div class="baseline-text">Baseline: <span id="disp-sound-baseline">35.0 – 48.0 dB</span></div>
+                            <div class="deviation-pill neutral" id="dev-sound"><i class="fa-solid fa-check"></i> Normal</div>
+                        </div>
+                    </div>
+
+                    <!-- Motor Efficiency & Torque Card -->
+                    <div class="metric-card" id="card-efficiency">
+                        <div class="card-header-flex">
+                            <span class="card-label"><i class="fa-solid fa-gauge text-success"></i> Efficiency & Torque</span>
+                            <span class="badge badge-normal">OPTIMAL</span>
+                        </div>
+                        <div class="metric-value-wrap">
+                            <span class="metric-val" id="val-efficiency">92.5</span>
+                            <span class="metric-unit">%</span>
+                        </div>
+                        <div class="baseline-comparison">
+                            <div class="baseline-text">Est Torque: <span id="val-torque-display">0.85 Nm</span></div>
+                            <div class="deviation-pill neutral"><i class="fa-solid fa-check"></i> High Efficiency</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Overview Charts & Alert Center Row -->
+                <div class="dashboard-charts-row">
+                    <div class="chart-panel flex-2">
+                        <div class="panel-header">
+                            <div>
+                                <h3 class="panel-title"><i class="fa-solid fa-chart-area"></i> Live Sensor Telemetry & Health Trend</h3>
+                                <span class="panel-subtitle">Real-time synchronized data stream (1000ms polling)</span>
+                            </div>
+                            <div class="chart-controls">
+                                <button class="btn-chip active" data-range="live">Live</button>
+                                <button class="btn-chip" data-range="5m">5m</button>
+                                <button class="btn-chip" data-range="15m">15m</button>
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="overviewCombinedChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Active Alerts Box -->
+                    <div class="chart-panel flex-1">
+                        <div class="panel-header">
+                            <h3 class="panel-title"><i class="fa-solid fa-bell text-warning"></i> Active System Alerts</h3>
+                            <span class="badge badge-neutral" id="alert-count-badge">0 Alerts</span>
+                        </div>
+                        <div class="alerts-list-wrapper" id="alerts-container">
+                            <div class="empty-alerts">
+                                <i class="fa-solid fa-circle-check text-success"></i>
+                                <p>All telemetry parameters operating within normal baseline limits.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 2: LIVE SENSORS TAB -->
+            <section id="tab-sensors" class="tab-page">
+                <div class="section-title-row">
+                    <div>
+                        <h2>Live Sensor Telemetry</h2>
+                        <p class="section-desc">Detailed physical sensor parameters & status breakdown.</p>
+                    </div>
+                </div>
+
+                <div class="sensor-cards-grid">
+                    <!-- Sensor Item 1 -->
+                    <div class="sensor-detail-card">
+                        <div class="sensor-card-top">
+                            <div class="sensor-icon-box temp-bg"><i class="fa-solid fa-temperature-full"></i></div>
+                            <div>
+                                <h4 class="sensor-title">DS18B20 / NTC Temperature Sensor</h4>
+                                <span class="sensor-sub">ESP32 GPIO 4 • Digital/Analog</span>
+                            </div>
+                            <span class="sensor-conn-online"><i class="fa-solid fa-circle-dot"></i> Connected</span>
+                        </div>
+                        <div class="sensor-card-metrics">
+                            <div class="s-metric">
+                                <span class="s-label">Current Read</span>
+                                <span class="s-val" id="sensor-page-temp">36.5 °C</span>
+                            </div>
+                            <div class="s-metric">
+                                <span class="s-label">Baseline Threshold</span>
+                                <span class="s-val" id="sensor-page-temp-limit">Max 45.0 °C</span>
+                            </div>
+                            <div class="s-metric">
+                                <span class="s-label">Health Impact</span>
+                                <span class="s-val text-success">Low</span>
+                            </div>
+                        </div>
+                        <div class="mini-chart-wrapper">
+                            <canvas id="miniTempChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Sensor Item 2 -->
+                    <div class="sensor-detail-card">
+                        <div class="sensor-card-top">
+                            <div class="sensor-icon-box rpm-bg"><i class="fa-solid fa-rotate"></i></div>
+                            <div>
+                                <h4 class="sensor-title">Tachometer / Optocoupler Speed Sensor</h4>
+                                <span class="sensor-sub">ESP32 GPIO 18 • Pulse Counter</span>
+                            </div>
+                            <span class="sensor-conn-online"><i class="fa-solid fa-circle-dot"></i> Connected</span>
+                        </div>
+                        <div class="sensor-card-metrics">
+                            <div class="s-metric">
+                                <span class="s-label">Current RPM</span>
+                                <span class="s-val" id="sensor-page-rpm">1450 RPM</span>
+                            </div>
+                            <div class="s-metric">
+                                <span class="s-label">Target Baseline</span>
+                                <span class="s-val">1450 ±50 RPM</span>
+                            </div>
+                            <div class="s-metric">
+                                <span class="s-label">Slip Ratio</span>
+                                <span class="s-val text-success">0.2%</span>
+                            </div>
+                        </div>
+                        <div class="mini-chart-wrapper">
+                            <canvas id="miniRpmChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Sensor Item 3 -->
+                    <div class="sensor-detail-card">
+                        <div class="sensor-card-top">
+                            <div class="sensor-icon-box current-bg"><i class="fa-solid fa-bolt"></i></div>
+                            <div>
+                                <h4 class="sensor-title">ACS712 & 12V Voltage Sensor</h4>
+                                <span class="sensor-sub">ESP32 ADC GPIO 34 & 35</span>
+                            </div>
+                            <span class="sensor-conn-online"><i class="fa-solid fa-circle-dot"></i> Connected</span>
+                        </div>
+                        <div class="sensor-card-metrics">
+                            <div class="s-metric">
+                                <span class="s-label">Motor Amperage</span>
+                                <span class="s-val" id="sensor-page-current">2.35 A</span>
+                            </div>
+                            <div class="s-metric">
+                                <span class="s-label">Supply Voltage</span>
+                                <span class="s-val" id="sensor-page-voltage">12.1 V</span>
+                            </div>
+                            <div class="s-metric">
+                                <span class="s-label">Total Power</span>
+                                <span class="s-val text-info" id="sensor-page-power">28.4 W</span>
+                            </div>
+                        </div>
+                        <div class="mini-chart-wrapper">
+                            <canvas id="miniCurrentChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Sensor Item 4 -->
+                    <div class="sensor-detail-card">
+                        <div class="sensor-card-top">
+                            <div class="sensor-icon-box vib-bg"><i class="fa-solid fa-wave-square"></i></div>
+                            <div>
+                                <h4 class="sensor-title">MPU6050 Accelerometer / Vibration</h4>
+                                <span class="sensor-sub">ESP32 I2C (SDA 21 / SCL 22)</span>
+                            </div>
+                            <span class="sensor-conn-online"><i class="fa-solid fa-circle-dot"></i> Connected</span>
+                        </div>
+                        <div class="sensor-card-metrics">
+                            <div class="s-metric">
+                                <span class="s-label">Vibration RMS</span>
+                                <span class="s-val" id="sensor-page-vib">1.45 g</span>
+                            </div>
+                            <div class="s-metric">
+                                <span class="s-label">Frequency Peak</span>
+                                <span class="s-val">24.1 Hz</span>
+                            </div>
+                            <div class="s-metric">
+                                <span class="s-label">Bearing Condition</span>
+                                <span class="s-val text-success">Good</span>
+                            </div>
+                        </div>
+                        <div class="mini-chart-wrapper">
+                            <canvas id="miniVibChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 3: ANALYTICS TAB -->
+            <section id="tab-analytics" class="tab-page">
+                <div class="section-title-row">
+                    <div>
+                        <h2>Analytics & Health Correlations</h2>
+                        <p class="section-desc">Cross-parameter correlations to identify thermal runaway, mechanical friction or electrical overload.</p>
+                    </div>
+                </div>
+
+                <div class="analytics-grid">
+                    <div class="chart-panel">
+                        <div class="panel-header">
+                            <h3 class="panel-title"><i class="fa-solid fa-temperature-arrow-up"></i> Temperature vs Motor Current Correlation</h3>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="chartTempCurrentCorr"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-panel">
+                        <div class="panel-header">
+                            <h3 class="panel-title"><i class="fa-solid fa-volcano"></i> Vibration vs RPM Friction Matrix</h3>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="chartVibRpmCorr"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 4: MOTOR CONTROL & CONFIG TAB -->
+            <section id="tab-control" class="tab-page">
+                <div class="section-title-row">
+                    <div>
+                        <h2>Motor Remote Control & Baseline Settings</h2>
+                        <p class="section-desc">Manage ESP32 relay/PWM outputs, simulation injection & safety baselines.</p>
+                    </div>
+                </div>
+
+                <div class="control-panels-grid">
+                    <!-- Motor Command Panel -->
+                    <div class="config-card">
+                        <div class="config-card-header">
+                            <i class="fa-solid fa-toggle-on text-success"></i>
+                            <h3>Motor Operation Switch</h3>
+                        </div>
+                        <div class="config-body">
+                            <div class="control-switch-group">
+                                <div>
+                                    <label class="control-label">Remote Power Relay State</label>
+                                    <span class="control-desc">Toggles ESP32 digital output pin to start or stop the motor.</span>
+                                </div>
+                                <label class="main-toggle-switch">
+                                    <input type="checkbox" id="toggle-motor-state" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="control-switch-group">
+                                <div>
+                                    <label class="control-label">Control Authority</label>
+                                    <span class="control-desc">Select active control override source</span>
+                                </div>
+                                <select class="select-input" id="select-control-source">
+                                    <option value="dashboard">Web Dashboard (Remote)</option>
+                                    <option value="hardware">Physical Switch on Motor Rig</option>
+                                    <option value="auto">Auto Emergency Cutoff</option>
+                                </select>
+                            </div>
+
+                            <div class="control-switch-group">
+                                <div>
+                                    <label class="control-label">Motor Speed Control (PWM)</label>
+                                    <span class="control-desc" id="pwm-value-label">Target: 1450 RPM (100% duty)</span>
+                                </div>
+                                <input type="range" class="range-slider" id="range-motor-pwm" min="0" max="100" value="95">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fault Simulation Injector (Crucial for live demos to mentor!) -->
+                    <div class="config-card">
+                        <div class="config-card-header">
+                            <i class="fa-solid fa-bug text-warning"></i>
+                            <h3>Demo Fault Injector (For Testing Alerts)</h3>
+                        </div>
+                        <div class="config-body">
+                            <p class="config-info-text">Simulate hardware anomalies to test baseline deviation algorithms and warning popups:</p>
+                            <div class="fault-buttons-grid">
+                                <button class="btn btn-outline-warning" id="inject-overheat">
+                                    <i class="fa-solid fa-fire-flame-curved"></i> Inject Overheating (58°C)
+                                </button>
+                                <button class="btn btn-outline-warning" id="inject-vibration">
+                                    <i class="fa-solid fa-burst"></i> Inject High Vibration (3.8g)
+                                </button>
+                                <button class="btn btn-outline-warning" id="inject-overcurrent">
+                                    <i class="fa-solid fa-bolt-lightning"></i> Inject Overcurrent (4.5A)
+                                </button>
+                                <button class="btn btn-outline-success" id="reset-faults">
+                                    <i class="fa-solid fa-rotate-left"></i> Restore Normal Conditions
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom Baseline Thresholds Form -->
+                    <div class="config-card full-width">
+                        <div class="config-card-header">
+                            <i class="fa-solid fa-sliders text-warning"></i>
+                            <h3>Custom Baseline Safety Thresholds Setup</h3>
+                        </div>
+                        <div class="config-body grid-3-col">
+                            <div class="form-group">
+                                <label class="form-label">Max Temperature Limit (°C)</label>
+                                <input type="number" class="text-input" id="input-thresh-temp" value="45.0" step="0.5">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Max Vibration Limit (g RMS)</label>
+                                <input type="number" class="text-input" id="input-thresh-vib" value="2.30" step="0.1">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Max Motor Current Limit (A)</label>
+                                <input type="number" class="text-input" id="input-thresh-current" value="3.50" step="0.1">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Target Motor Speed (RPM)</label>
+                                <input type="number" class="text-input" id="input-thresh-rpm" value="1450" step="10">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Max Acoustic Sound Limit (dB)</label>
+                                <input type="number" class="text-input" id="input-thresh-sound" value="55.0" step="1">
+                            </div>
+                            <div class="form-group" style="display: flex; align-items: flex-end;">
+                                <button class="btn btn-primary" id="btn-save-thresholds" style="width: 100%;">
+                                    <i class="fa-solid fa-floppy-disk"></i> Apply & Save Thresholds
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Data Source Configuration Panel -->
+                    <div class="config-card full-width">
+                        <div class="config-card-header">
+                            <i class="fa-solid fa-network-wired text-info"></i>
+                            <h3>Data Source Configuration (ESP32 Integration)</h3>
+                        </div>
+                        <div class="config-body grid-2-col">
+                            <div class="form-group">
+                                <label class="form-label">Data Connection Mode</label>
+                                <select class="select-input" id="select-data-mode">
+                                    <option value="mock">Simulated Mock Engine (Active)</option>
+                                    <option value="rest">ESP32 REST API (HTTP GET /json)</option>
+                                    <option value="websocket">ESP32 WebSocket Stream (ws://)</option>
+                                    <option value="mqtt">MQTT Broker (WebSockets)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">ESP32 IP / Endpoint URL</label>
+                                <input type="text" class="text-input" id="input-api-url" value="http://192.168.4.1/api/telemetry" placeholder="http://192.168.1.100/data">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 5: ESP32 FIRMWARE CODE TAB -->
+            <section id="tab-firmware" class="tab-page">
+                <div class="section-title-row">
+                    <div>
+                        <h2>ESP32 Ready-to-Flash Arduino Code Template</h2>
+                        <p class="section-desc">Give this code to your hardware team to connect the ESP32 directly to this web dashboard over Wi-Fi.</p>
+                    </div>
+                    <div>
+                        <button class="btn btn-outline" id="btn-copy-esp32-code"><i class="fa-solid fa-copy"></i> Copy C++ Code</button>
+                    </div>
+                </div>
+
+                <div class="config-card full-width">
+                    <div class="config-card-header">
+                        <i class="fa-solid fa-microchip text-info"></i>
+                        <h3>ESP32 Wi-Fi HTTP Telemetry Server (Arduino C++)</h3>
+                    </div>
+                    <div class="config-body">
+                        <pre class="code-block" id="esp32-code-snippet"><code>/*
+ * MotoSafe ESP32 Telemetry & Web API Server
+ * Open MotoSafe_ESP32_Firmware.ino directly in Arduino IDE!
+ */
+
+#include &lt;WiFi.h&gt;
+#include &lt;WebServer.h&gt;
+#include &lt;ArduinoJson.h&gt;
+
+const char* ssid = "MotoSafe_ESP32_AP";
+const char* password = "motosafe_pass";
+
+WebServer server(80);
+
+const int PIN_TEMP    = 4;
+const int PIN_RPM     = 18;
+const int PIN_CURRENT = 34;
+const int PIN_VOLTAGE = 35;
+const int PIN_RELAY   = 26;
+
+void handleTelemetry() {
+  StaticJsonDocument&lt;384&gt; doc;
+  doc["temp"]       = 36.5;
+  doc["rpm"]        = 1450;
+  doc["current"]    = 2.35;
+  doc["voltage"]    = 12.1;
+  doc["vibration"]  = 1.45;
+  doc["sound"]      = 38.5;
+  doc["power"]      = 28.4;
+  doc["motorState"] = digitalRead(PIN_RELAY) == HIGH ? "RUNNING" : "STOPPED";
+
+  String jsonResponse;
+  serializeJson(doc, jsonResponse);
+
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", jsonResponse);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_RELAY, OUTPUT);
+  digitalWrite(PIN_RELAY, HIGH);
+
+  WiFi.softAP(ssid, password);
+  Serial.print("ESP32 AP IP: http://");
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/api/telemetry", HTTP_GET, handleTelemetry);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+}
+</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 6: MAINTENANCE & LOGS TAB -->
+            <section id="tab-maintenance" class="tab-page">
+                <div class="section-title-row">
+                    <div>
+                        <h2>Maintenance Records & Event Logs</h2>
+                        <p class="section-desc">Historical runtime statistics, alert logs, and export options.</p>
+                    </div>
+                    <div class="quick-action-btns">
+                        <button class="btn btn-outline" id="btn-generate-report"><i class="fa-solid fa-file-pdf"></i> Generate Printable Report</button>
+                        <button class="btn btn-outline" id="btn-export-csv"><i class="fa-solid fa-download"></i> Export CSV Log</button>
+                    </div>
+                </div>
+
+                <div class="maintenance-summary-grid">
+                    <div class="m-card">
+                        <i class="fa-solid fa-clock text-info m-icon"></i>
+                        <div>
+                            <span class="m-label">Total Running Hours</span>
+                            <span class="m-val" id="val-runtime">0.0 hrs</span>
+                        </div>
+                    </div>
+                    <div class="m-card">
+                        <i class="fa-solid fa-calendar-check text-success m-icon"></i>
+                        <div>
+                            <span class="m-label">Last Serviced</span>
+                            <span class="m-val" id="val-last-serviced">Today</span>
+                        </div>
+                    </div>
+                    <div class="m-card">
+                        <i class="fa-solid fa-triangle-exclamation text-warning m-icon"></i>
+                        <div>
+                            <span class="m-label">Total Anomaly Events</span>
+                            <span class="m-val" id="val-total-anomalies">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-card">
+                    <div class="table-header">
+                        <h3>Event History Log</h3>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="custom-table" id="events-table">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Event Type</th>
+                                    <th>Sensor Parameter</th>
+                                    <th>Recorded Value</th>
+                                    <th>Baseline Limit</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="events-table-body">
+                                <!-- Populated dynamically by app.js -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- User Role Authentication Modal (Phase 19) -->
+    <div class="modal-overlay" id="login-modal" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <i class="fa-solid fa-user-shield modal-icon text-info"></i>
+                <div>
+                    <h3>MotoSafe Role-Based Access Control</h3>
+                    <p>Select your user role or enter credentials to sign in:</p>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="role-selector-grid">
+                    <div class="role-option active" data-role="admin">
+                        <i class="fa-solid fa-user-gear text-danger"></i>
+                        <h4>Admin</h4>
+                        <p>Full control: Motor ON/OFF, PWM, Baseline setup, Fault injectors.</p>
+                    </div>
+                    <div class="role-option" data-role="technician">
+                        <i class="fa-solid fa-user-check text-warning"></i>
+                        <h4>Technician</h4>
+                        <p>Operator: Motor ON/OFF, view telemetry & acknowledge alerts.</p>
+                    </div>
+                    <div class="role-option" data-role="viewer">
+                        <i class="fa-solid fa-eye text-info"></i>
+                        <h4>Viewer / Mentor</h4>
+                        <p>Read-only: Monitoring telemetry & health graphs (Control disabled).</p>
+                    </div>
+                </div>
+
+                <div class="login-actions">
+                    <button class="btn btn-primary" id="btn-login-confirm" style="width: 100%;">
+                        <i class="fa-solid fa-right-to-bracket"></i> Sign In to Selected Role
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
