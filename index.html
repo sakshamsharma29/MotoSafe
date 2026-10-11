@@ -43,8 +43,8 @@
             <button class="btn btn-outline btn-sm" id="btn-toggle-source" title="Switch between Mock Simulation and Hardware API">
                 <i class="fa-solid fa-sliders"></i> Mode
             </button>
-            <button class="btn btn-primary btn-sm" id="btn-user-profile" title="Switch Role / Login">
-                <i class="fa-solid fa-user-shield"></i> <span id="current-user-role">Role: Admin</span>
+            <button class="btn btn-outline btn-sm" id="btn-user-profile" title="Switch Role / Login">
+                <i class="fa-solid fa-user-shield"></i> <span id="current-user-role">Role: VIEWER</span>
             </button>
         </div>
     </header>
@@ -759,24 +759,33 @@ void loop() {
                 <div class="role-selector-grid">
                     <div class="role-option active" data-role="admin">
                         <i class="fa-solid fa-user-gear text-danger"></i>
-                        <h4>Admin</h4>
-                        <p>Full control: Motor ON/OFF, PWM, Baseline setup, Fault injectors.</p>
-                    </div>
-                    <div class="role-option" data-role="technician">
-                        <i class="fa-solid fa-user-check text-warning"></i>
-                        <h4>Technician</h4>
-                        <p>Operator: Motor ON/OFF, view telemetry & acknowledge alerts.</p>
+                        <h4>Admin (Host Device)</h4>
+                        <p>Full control: Motor ON/OFF, PWM speed, Safety baselines & Fault injectors.</p>
                     </div>
                     <div class="role-option" data-role="viewer">
                         <i class="fa-solid fa-eye text-info"></i>
-                        <h4>Viewer / Mentor</h4>
-                        <p>Read-only: Monitoring telemetry & health graphs (Control disabled).</p>
+                        <h4>Viewer / Mentor (Remote Devices)</h4>
+                        <p>Read-only: Monitor live telemetry, baseline trends & health graphs (Controls locked).</p>
                     </div>
                 </div>
 
-                <div class="login-actions">
-                    <button class="btn btn-primary" id="btn-login-confirm" style="width: 100%;">
-                        <i class="fa-solid fa-right-to-bracket"></i> Sign In to Selected Role
+                <div id="admin-pin-group" style="display: none; margin-bottom: 18px; text-align: left; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px;">
+                    <label style="font-size: 12px; font-weight: 600; color: #f87171; display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                        <i class="fa-solid fa-shield-halved"></i> Admin Master Passcode Required:
+                    </label>
+                    <input type="password" id="input-admin-pin" placeholder="Enter Admin PIN to unlock control" style="width: 100%; padding: 10px 12px; border-radius: 6px; background: #0f172a; border: 1px solid var(--border-bright); color: #fff; font-size: 14px; box-sizing: border-box; outline: none;">
+                    <div id="admin-pin-error" style="color: #ef4444; font-size: 12px; margin-top: 6px; display: none;">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Incorrect PIN. Machine controls remain locked to host.
+                    </div>
+                    <small style="color: var(--text-muted); font-size: 11px; display: block; margin-top: 4px;">Only the physical host device connected to ESP32 has default master access.</small>
+                </div>
+
+                <div class="login-actions" style="display: flex; gap: 10px;">
+                    <button class="btn btn-outline" id="btn-login-cancel" style="flex: 1;">
+                        <i class="fa-solid fa-xmark"></i> Cancel
+                    </button>
+                    <button class="btn btn-primary" id="btn-login-confirm" style="flex: 1.5;">
+                        <i class="fa-solid fa-right-to-bracket"></i> Apply Role
                     </button>
                 </div>
             </div>

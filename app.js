@@ -33,7 +33,7 @@ const state = {
     faultInjected: null, // null | 'temp' | 'vibration' | 'current'
     audioAlertEnabled: false,
     lastAudioTime: 0,
-    userRole: 'admin', // 'admin' | 'technician' | 'viewer'
+    userRole: 'viewer', // 'admin' | 'technician' | 'viewer'
 
     // Telemetry Buffer
     telemetryHistory: [],
@@ -1229,22 +1229,60 @@ function updateMiniChart(chartId, labels, data) {
 }
 
 // --------------------------------------------------------------------------
-// 9. Role-Based Access Control (Phase 19)
+// 9. Role-Based Access Control (Host Machine Admin vs Remote Viewers)
 // --------------------------------------------------------------------------
+function isPhysicalHostDevice() {
+    const host = window.location.hostname;
+    // Host machine where ESP32 is plugged in, or device connected directly to ESP32 Wi-Fi AP
+    return (host === 'localhost' || host === '127.0.0.1' || host === '192.168.4.1' || host.startsWith('192.168.4.'));
+}
+
 function initAuthRoleSystem() {
-    const savedRole = localStorage.getItem('motosafe_role') || 'admin';
+    // Only the direct physical host machine or ESP32 AP gets Admin by default.
+    // Remote devices (Render link on phones/laptops) strictly default to Viewer / Mentor.
+    let savedRole = localStorage.getItem('motosafe_role');
+    if (!savedRole) {
+        savedRole = isPhysicalHostDevice() ? 'admin' : 'viewer';
+        localStorage.setItem('motosafe_role', savedRole);
+    }
     state.userRole = savedRole;
 
     const modal = document.getElementById('login-modal');
     const userBtn = document.getElementById('btn-user-profile');
     const confirmBtn = document.getElementById('btn-login-confirm');
+    const cancelBtn = document.getElementById('btn-login-cancel');
+    const pinGroup = document.getElementById('admin-pin-group');
+    const pinInput = document.getElementById('input-admin-pin');
+    const pinError = document.getElementById('admin-pin-error');
     const roleOptions = document.querySelectorAll('.role-option');
 
     let selectedRole = savedRole;
 
     if (userBtn) {
         userBtn.addEventListener('click', () => {
-            if (modal) modal.style.display = 'flex';
+            if (modal) {
+                // Preselect current role in modal UI
+                roleOptions.forEach(o => {
+                    o.classList.toggle('active', o.getAttribute('data-role') === state.userRole);
+                });
+                selectedRole = state.userRole;
+                if (pinGroup) pinGroup.style.display = (selectedRole === 'admin' && !isPhysicalHostDevice()) ? 'block' : 'none';
+                if (pinError) pinError.style.display = 'none';
+                if (pinInput) pinInput.value = '';
+                modal.style.display = 'flex';
+            }
+        });
+    }
+
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+            if (modal) modal.style.display = 'none';
+        });
+    }
+
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.style.display = 'none';
         });
     }
 
@@ -1253,11 +1291,34 @@ function initAuthRoleSystem() {
             roleOptions.forEach(o => o.classList.remove('active'));
             opt.classList.add('active');
             selectedRole = opt.getAttribute('data-role');
+
+            if (pinGroup) {
+                // If attempting to switch to Admin from a remote device, ask for PIN
+                if (selectedRole === 'admin' && !isPhysicalHostDevice()) {
+                    pinGroup.style.display = 'block';
+                    if (pinInput) pinInput.focus();
+                } else {
+                    pinGroup.style.display = 'none';
+                }
+            }
+            if (pinError) pinError.style.display = 'none';
         });
     });
 
     if (confirmBtn) {
         confirmBtn.addEventListener('click', () => {
+            if (selectedRole === 'admin' && !isPhysicalHostDevice()) {
+                const pin = pinInput ? pinInput.value.trim() : '';
+                // Master Admin PIN for remote promotion: moto2026
+                if (pin !== 'moto2026') {
+                    if (pinError) {
+                        pinError.style.display = 'block';
+                        pinError.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Invalid Passcode! Only the ESP32 host device has Admin access.';
+                    }
+                    return;
+                }
+            }
+
             state.userRole = selectedRole;
             localStorage.setItem('motosafe_role', selectedRole);
             if (modal) modal.style.display = 'none';
@@ -1272,8 +1333,16 @@ function initAuthRoleSystem() {
 function applyRolePermissions() {
     const role = state.userRole;
     const roleBadge = document.getElementById('current-user-role');
+    const userBtn = document.getElementById('btn-user-profile');
+
     if (roleBadge) {
-        roleBadge.textContent = `Role: ${role.toUpperCase()}`;
+        if (role === 'admin') {
+            roleBadge.textContent = 'Role: ADMIN (Host)';
+            if (userBtn) userBtn.className = 'btn btn-primary btn-sm';
+        } else {
+            roleBadge.textContent = 'Role: VIEWER / MENTOR';
+            if (userBtn) userBtn.className = 'btn btn-outline btn-sm';
+        }
     }
 
     const controlTab = document.getElementById('tab-control');
@@ -1285,31 +1354,40 @@ function applyRolePermissions() {
     const saveThreshBtn = document.getElementById('btn-save-thresholds');
 
     if (role === 'viewer') {
-        // Read-only Viewer/Mentor Role: Lock controls
-        if (quickStopBtn) quickStopBtn.disabled = true;
-        if (quickStartBtn) quickStartBtn.disabled = true;
+        // Read-only Viewer/Mentor Role: Lock all actuation & changes
+        if (quickStopBtn) {
+            quickStopBtn.disabled = true;
+            quickStopBtn.title = "Host Admin Access Required (Read-Only Mode)";
+        }
+        if (quickStartBtn) {
+            quickStartBtn.disabled = true;
+            quickStartBtn.title = "Host Admin Access Required (Read-Only Mode)";
+        }
         if (toggleSwitch) toggleSwitch.disabled = true;
         if (pwmSlider) pwmSlider.disabled = true;
         if (saveThreshBtn) saveThreshBtn.disabled = true;
-        faultButtons.forEach(b => b.disabled = true);
+        faultButtons.forEach(b => {
+            b.disabled = true;
+            b.title = "Host Admin Access Required";
+        });
         if (controlTab) controlTab.classList.add('role-disabled-lock');
-    } else if (role === 'technician') {
-        // Operator Role: Can toggle motor, but cannot change thresholds or inject faults
-        if (quickStopBtn) quickStopBtn.disabled = false;
-        if (quickStartBtn) quickStartBtn.disabled = false;
-        if (toggleSwitch) toggleSwitch.disabled = false;
-        if (pwmSlider) pwmSlider.disabled = false;
-        if (saveThreshBtn) saveThreshBtn.disabled = true;
-        faultButtons.forEach(b => b.disabled = true);
-        if (controlTab) controlTab.classList.remove('role-disabled-lock');
     } else {
-        // Admin Role: Full Access
-        if (quickStopBtn) quickStopBtn.disabled = false;
-        if (quickStartBtn) quickStartBtn.disabled = false;
+        // Admin Role: Full machine authority
+        if (quickStopBtn) {
+            quickStopBtn.disabled = false;
+            quickStopBtn.title = "Emergency Stop Motor";
+        }
+        if (quickStartBtn) {
+            quickStartBtn.disabled = false;
+            quickStartBtn.title = "Start Motor";
+        }
         if (toggleSwitch) toggleSwitch.disabled = false;
         if (pwmSlider) pwmSlider.disabled = false;
         if (saveThreshBtn) saveThreshBtn.disabled = false;
-        faultButtons.forEach(b => b.disabled = false);
+        faultButtons.forEach(b => {
+            b.disabled = false;
+            b.title = "";
+        });
         if (controlTab) controlTab.classList.remove('role-disabled-lock');
     }
 }
