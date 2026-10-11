@@ -47,6 +47,7 @@ const int PIN_RPM_SENSOR      = 27; // Tachometer Proximity Pulse Sensor (GPIO 2
 const int PIN_STATUS_LED      = 2;  // Built-in status LED (onboard blue LED)
 
 // Tachometer Variables
+const int ENCODER_SLOTS       = 20; // Standard 20 slots on optical encoder disc
 volatile unsigned long rpmPulseCount = 0;
 unsigned long lastRpmCalcTime = 0;
 int currentRealRPM = 0;
@@ -309,11 +310,30 @@ float readVibration() {
 
 // 5. Sound / Acoustic Read (Sound Sensor module on GPIO 35)
 float readSound() {
-  int rawADC = analogRead(PIN_SOUND);
-  if (rawADC <= 5) {
-    return 0.0; // Sound sensor disconnected
+  // Peak-to-peak audio wave sampling window (30ms)
+  unsigned int signalMax = 0;
+  unsigned int signalMin = 4095;
+  unsigned long startMillis = millis();
+
+  while (millis() - startMillis < 30) {
+    int sample = analogRead(PIN_SOUND);
+    if (sample > signalMax) signalMax = sample;
+    if (sample < signalMin) signalMin = sample;
   }
-  float soundDb = 35.0 + (rawADC / 4095.0) * 35.0;
+
+  int peakToPeak = signalMax - signalMin;
+
+  // If signal is flat near 0, check digital logic level fallback
+  if (signalMax <= 15 && signalMin <= 15) {
+    if (digitalRead(PIN_SOUND) == HIGH) {
+      return 52.0; // Digital microphone sound detection triggered
+    }
+    return 0.0; // Microphone disconnected
+  }
+
+  // Convert peak-to-peak amplitude to decibels (36 dB quiet ambient to 88 dB loud)
+  float soundDb = 36.0 + ((float)peakToPeak / 2048.0) * 45.0;
+  if (soundDb > 95.0) soundDb = 95.0;
   return soundDb;
 }
 
@@ -328,8 +348,8 @@ int calculateRPM() {
     rpmPulseCount = 0;
     interrupts();
 
-    // Calculate RPM = (Pulses in elapsed time) * (60,000 ms / elapsed ms)
-    currentRealRPM = (pulses * 60000UL) / elapsed;
+    // Calculate RPM = (Pulses in elapsed time) * (60,000 ms / elapsed ms) / ENCODER_SLOTS
+    currentRealRPM = (pulses * 60000UL) / (elapsed * ENCODER_SLOTS);
     lastRpmCalcTime = now;
   }
   return currentRealRPM;
