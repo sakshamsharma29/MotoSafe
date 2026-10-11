@@ -942,22 +942,14 @@ function loadSavedThresholds() {
 }
 
 function setMotorState(newState) {
-    if (newState === 'RUNNING' && CONFIG.dataSource !== 'mock' && !state.isHardwareConnected) {
-        const toggleSwitch = document.getElementById('toggle-motor-state');
-        if (toggleSwitch) toggleSwitch.checked = false;
-        const modal = document.getElementById('offline-alert-modal');
-        if (modal) modal.style.display = 'flex';
-        logEvent('WARN', 'Motor Safety Guard', 'BLOCKED', 'Hardware Offline', 'Safety Interlock Engaged');
-        return;
-    }
-
     state.motorState = newState;
     const isRunning = newState === 'RUNNING';
 
     document.getElementById('sidebar-motor-state').textContent = isRunning ? 'RUNNING' : 'STOPPED';
     document.getElementById('sidebar-motor-state').style.color = isRunning ? 'var(--success)' : 'var(--danger)';
     document.getElementById('sidebar-motor-dot').className = isRunning ? 'status-indicator-dot online' : 'status-indicator-dot offline';
-    document.getElementById('toggle-motor-state').checked = isRunning;
+    const toggleSwitch = document.getElementById('toggle-motor-state');
+    if (toggleSwitch) toggleSwitch.checked = isRunning;
 
     // Send control command to Node.js backend
     fetch('/api/control', {
