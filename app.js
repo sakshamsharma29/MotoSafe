@@ -3,11 +3,13 @@
  * Pure HTML, CSS, JavaScript Dashboard Architecture
  */
 
+const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+
 // Global System Configuration & Baselines
 const CONFIG = {
     pollingIntervalMs: 1000,
     historyMaxLength: 30, // Keep 30 time points in live charts
-    dataSource: 'rest',   // 'mock' | 'rest' | 'websocket' | 'mqtt'
+    dataSource: isHttps ? 'mock' : 'rest',   // 'mock' on Cloud HTTPS (Mixed content blocks http://192.168.4.1), 'rest' on local HTTP
     apiUrl: 'http://192.168.4.1/api/telemetry',
     
     // Motor Baseline Limits & Normal Operating Thresholds
@@ -27,7 +29,7 @@ const state = {
     hardwareOfflineTicks: 0,
     motorState: 'STOPPED', // 'RUNNING' | 'STOPPED' | 'CRITICAL'
     controlSource: 'dashboard',
-    targetPwm: 0,
+    targetPwm: 95,
     runningSeconds: 0, // Real-time running hours accumulator
     healthScore: 100,
     faultInjected: null, // null | 'temp' | 'vibration' | 'current'
@@ -220,6 +222,13 @@ async function fetchTelemetryData() {
         state.hardwareOfflineTicks = (state.hardwareOfflineTicks || 0) + 1;
         state.isHardwareConnected = false;
         console.warn('ESP32 REST hardware fetch offline:', err);
+        
+        // Auto-switch to Live Simulation mode if hardware unreachable so dashboard is never blank/frozen
+        if (state.hardwareOfflineTicks >= 2 && CONFIG.dataSource === 'rest') {
+            console.log('⚡ ESP32 unreachable. Auto-switching to Live Simulation mode.');
+            logEvent('WARN', 'Data Source', 'ESP32 Offline', 'Auto-Fallback', 'Simulation Mode');
+            setDataSource('mock');
+        }
     }
 
     // If ESP32 hardware polling fails or sensors are unattached, return strict real hardware zero state
@@ -1007,11 +1016,13 @@ function injectFault(type, description) {
 
 function loadSavedDataSource() {
     const saved = localStorage.getItem('motosafe_data_source');
-    if (saved) {
+    if (saved && (!isHttps || saved !== 'rest')) {
         CONFIG.dataSource = saved;
-        const modeSelect = document.getElementById('select-data-mode');
-        if (modeSelect) modeSelect.value = saved;
+    } else if (isHttps) {
+        CONFIG.dataSource = 'mock';
     }
+    const modeSelect = document.getElementById('select-data-mode');
+    if (modeSelect) modeSelect.value = CONFIG.dataSource;
     updateConnectionHeader();
 }
 
