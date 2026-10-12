@@ -174,7 +174,8 @@ async function fetchTelemetryData() {
             const temp_dht = (esp.temp_dht !== undefined) ? Number(parseFloat(esp.temp_dht).toFixed(1)) : Number(parseFloat(esp.temp || 0).toFixed(1));
             const temp_ntc = (esp.temp_ntc !== undefined) ? Number(parseFloat(esp.temp_ntc).toFixed(1)) : 0.0;
             const temp = (temp_dht > 0) ? temp_dht : ((temp_ntc > 0) ? temp_ntc : Number(parseFloat(esp.temp || 0).toFixed(1)));
-            const rpm = parseInt(esp.rpm) || 0;
+            let rawRpm = parseInt(esp.rpm) || 0;
+            const rpm = (rawRpm > 1000) ? Math.round(rawRpm / 3) : rawRpm;
             const current = Number(parseFloat(esp.current).toFixed(2));
             const voltage = Number(parseFloat(esp.voltage).toFixed(1));
             const vibration = Number(parseFloat(esp.vibration).toFixed(2));
@@ -962,6 +963,7 @@ function setMotorState(newState) {
 
     // Direct sync to ESP32 Hardware REST API
     if (CONFIG.dataSource === 'rest') {
+        fetch(`http://192.168.4.1/api/control?state=${newState}`, { mode: 'no-cors' }).catch(() => {});
         fetch('http://192.168.4.1/api/control', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

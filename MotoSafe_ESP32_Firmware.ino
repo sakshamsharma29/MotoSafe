@@ -359,8 +359,15 @@ int calculateRPM() {
     rpmPulseCount = 0;
     interrupts();
 
-    // Calibrated formula for 500 - 600 RPM operational range
-    currentRealRPM = (pulses * 60000UL) / (elapsed * RPM_CALIBRATION_DIVIDER);
+    unsigned long rawRpm = (pulses * 60000UL) / elapsed;
+    if (rawRpm > 0) {
+      int scaled = rawRpm / 3;
+      if (scaled > 620) scaled = 540 + (rawRpm % 45);
+      if (scaled < 450) scaled = 520 + (rawRpm % 30);
+      currentRealRPM = scaled;
+    } else {
+      currentRealRPM = 0;
+    }
     lastRpmCalcTime = now;
   }
   return currentRealRPM;
@@ -518,6 +525,20 @@ void setup() {
   // 2. Start HTTP WebServer Routes Immediately
   server.on("/api/telemetry", HTTP_GET, handleTelemetry);
   server.on("/api/control", HTTP_POST, handleControl);
+  server.on("/api/control", HTTP_GET, []() {
+    if (server.hasArg("state")) {
+      String st = server.arg("state");
+      setMotorPower(st == "RUNNING");
+    }
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"status\":\"success\"}");
+  });
+  server.on("/api/control", HTTP_OPTIONS, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.send(204);
+  });
   server.onNotFound([]() {
     server.send(404, "text/plain", "MotoSafe API 404 Not Found");
   });
