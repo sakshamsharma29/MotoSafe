@@ -47,7 +47,7 @@ const int PIN_RPM_SENSOR      = 27; // Tachometer Proximity Pulse Sensor (GPIO 2
 const int PIN_STATUS_LED      = 2;  // Built-in status LED (onboard blue LED)
 
 // Tachometer Variables
-const int RPM_CALIBRATION_DIVIDER = 3; // Calibrates motor speed to 500 - 600 RPM range
+const int RPM_CALIBRATION_DIVIDER = 9; // Calibrates motor speed to 500 - 600 RPM range (1700 / 3 = 566 RPM)
 volatile unsigned long rpmPulseCount = 0;
 unsigned long lastRpmCalcTime = 0;
 int currentRealRPM = 0;

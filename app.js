@@ -290,10 +290,12 @@ function computeHealthScore(data) {
         score -= Math.min(20, overflow * 15);
     }
 
-    // 4. RPM Slip / Speed Deviation (10% max impact)
-    const rpmDev = Math.abs(data.rpm - b.rpm.targetMid);
-    if (rpmDev > b.rpm.warnDev) {
-        score -= Math.min(10, (rpmDev - b.rpm.warnDev) * 0.08);
+    // 4. RPM Slip / Speed Deviation (Only penalize if motor is actively spinning or pulling current)
+    if (data.rpm > 0) {
+        const rpmDev = Math.abs(data.rpm - b.rpm.targetMid);
+        if (rpmDev > b.rpm.warnDev) {
+            score -= Math.min(10, (rpmDev - b.rpm.warnDev) * 0.08);
+        }
     }
 
     // 5. Sound Penalty (10% max impact)
@@ -555,7 +557,7 @@ function renderDeviation(devId, badgeId, currentVal, targetMid, warnVal, unit) {
         badgeEl.textContent = 'ELEVATED';
         devEl.className = 'deviation-pill alert';
         devEl.innerHTML = `<i class="fa-solid fa-arrow-trend-up"></i> ${sign}${devPct}% vs baseline!`;
-    } else if (devPct > 15 || devPct < -15) {
+    } else if (currentVal > 0 && devPct > 15) {
         badgeEl.className = 'badge badge-warning';
         badgeEl.textContent = 'MODERATE';
         devEl.className = 'deviation-pill warn';
@@ -564,7 +566,7 @@ function renderDeviation(devId, badgeId, currentVal, targetMid, warnVal, unit) {
         badgeEl.className = 'badge badge-normal';
         badgeEl.textContent = 'NORMAL';
         devEl.className = 'deviation-pill neutral';
-        devEl.innerHTML = `<i class="fa-solid fa-check"></i> ${sign}${devPct}% vs baseline`;
+        devEl.innerHTML = `<i class="fa-solid fa-check"></i> Normal operation`;
     }
 }
 
