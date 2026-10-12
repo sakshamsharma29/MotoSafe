@@ -350,6 +350,12 @@ float readSound() {
 
 // 6. Motor Speed (Real RPM from proximity pulse sensor on GPIO 27)
 int calculateRPM() {
+  if (!motorIsOn) {
+    currentRealRPM = 0;
+    rpmPulseCount = 0;
+    return 0;
+  }
+
   unsigned long now = millis();
   unsigned long elapsed = now - lastRpmCalcTime;
 

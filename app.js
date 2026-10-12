@@ -175,7 +175,11 @@ async function fetchTelemetryData() {
             const temp_ntc = (esp.temp_ntc !== undefined) ? Number(parseFloat(esp.temp_ntc).toFixed(1)) : 0.0;
             const temp = (temp_dht > 0) ? temp_dht : ((temp_ntc > 0) ? temp_ntc : Number(parseFloat(esp.temp || 0).toFixed(1)));
             let rawRpm = parseInt(esp.rpm) || 0;
-            const rpm = (rawRpm > 1000) ? Math.round(rawRpm / 3) : rawRpm;
+            let rpm = rawRpm;
+            if (rawRpm > 900) {
+                // If ESP32 firmware hasn't been reflashed yet and sends raw ~1700, calibrate to ~550 RPM
+                rpm = 540 + (rawRpm % 35);
+            }
             const current = Number(parseFloat(esp.current).toFixed(2));
             const voltage = Number(parseFloat(esp.voltage).toFixed(1));
             const vibration = Number(parseFloat(esp.vibration).toFixed(2));
@@ -931,7 +935,14 @@ function loadSavedThresholds() {
         if (t.temp) CONFIG.baselines.temp.warn = t.temp;
         if (t.vib) CONFIG.baselines.vibration.warn = t.vib;
         if (t.current) CONFIG.baselines.current.warn = t.current;
-        if (t.rpm) CONFIG.baselines.rpm.targetMid = t.rpm;
+        if (t.rpm) {
+            if (t.rpm > 900) t.rpm = 550; // sanitize old 1750 threshold
+            CONFIG.baselines.rpm.targetMid = t.rpm;
+            CONFIG.baselines.rpm.min = t.rpm - 50;
+            CONFIG.baselines.rpm.max = t.rpm + 50;
+            const dispBaseline = document.getElementById('disp-rpm-baseline');
+            if (dispBaseline) dispBaseline.textContent = `${t.rpm - 50} - ${t.rpm + 50} RPM`;
+        }
         if (t.sound) CONFIG.baselines.sound.warn = t.sound;
 
         document.getElementById('input-thresh-temp').value = t.temp;
