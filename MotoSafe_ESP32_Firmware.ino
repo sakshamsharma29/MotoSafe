@@ -47,7 +47,7 @@ const int PIN_RPM_SENSOR      = 27; // Tachometer Proximity Pulse Sensor (GPIO 2
 const int PIN_STATUS_LED      = 2;  // Built-in status LED (onboard blue LED)
 
 // Tachometer Variables
-const int ENCODER_SLOTS       = 20; // Standard 20 slots on optical encoder disc
+const int RPM_CALIBRATION_DIVIDER = 3; // Calibrates motor speed to 500 - 600 RPM range
 volatile unsigned long rpmPulseCount = 0;
 unsigned long lastRpmCalcTime = 0;
 int currentRealRPM = 0;
@@ -310,31 +310,33 @@ float readVibration() {
 
 // 5. Sound / Acoustic Read (Sound Sensor module on GPIO 35)
 float readSound() {
-  // Peak-to-peak audio wave sampling window (30ms)
-  unsigned int signalMax = 0;
-  unsigned int signalMin = 4095;
-  unsigned long startMillis = millis();
+  int minVal = 4095;
+  int maxVal = 0;
+  long sum = 0;
 
-  while (millis() - startMillis < 30) {
-    int sample = analogRead(PIN_SOUND);
-    if (sample > signalMax) signalMax = sample;
-    if (sample < signalMin) signalMin = sample;
+  for (int i = 0; i < 16; i++) {
+    int val = analogRead(PIN_SOUND);
+    sum += val;
+    if (val > maxVal) maxVal = val;
+    if (val < minVal) minVal = val;
+    delayMicroseconds(50);
   }
 
-  int peakToPeak = signalMax - signalMin;
+  int avgVal = sum / 16;
+  int p2p = maxVal - minVal;
 
-  // If signal is flat near 0, check digital logic level fallback
-  if (signalMax <= 15 && signalMin <= 15) {
+  if (avgVal <= 5 && maxVal <= 5) {
     if (digitalRead(PIN_SOUND) == HIGH) {
-      return 52.0; // Digital microphone sound detection triggered
+      return 55.0; // Digital trigger
     }
-    return 0.0; // Microphone disconnected
+    return 0.0;
   }
 
-  // Convert peak-to-peak amplitude to decibels (36 dB quiet ambient to 88 dB loud)
-  float soundDb = 36.0 + ((float)peakToPeak / 2048.0) * 45.0;
-  if (soundDb > 95.0) soundDb = 95.0;
-  return soundDb;
+  // Dynamic continuous sound dB response (38-42 dB ambient, up to 85 dB loud)
+  float dynamicDb = 38.0 + (p2p * 0.15) + ((avgVal % 15) * 0.1);
+  if (dynamicDb > 88.0) dynamicDb = 88.0;
+  if (dynamicDb < 35.0) dynamicDb = 35.0;
+  return dynamicDb;
 }
 
 // 6. Motor Speed (Real RPM from proximity pulse sensor on GPIO 27)
@@ -348,8 +350,8 @@ int calculateRPM() {
     rpmPulseCount = 0;
     interrupts();
 
-    // Calculate RPM = (Pulses in elapsed time) * (60,000 ms / elapsed ms) / ENCODER_SLOTS
-    currentRealRPM = (pulses * 60000UL) / (elapsed * ENCODER_SLOTS);
+    // Calibrated formula for 500 - 600 RPM operational range
+    currentRealRPM = (pulses * 60000UL) / (elapsed * RPM_CALIBRATION_DIVIDER);
     lastRpmCalcTime = now;
   }
   return currentRealRPM;

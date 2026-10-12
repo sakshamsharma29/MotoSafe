@@ -13,7 +13,7 @@ const CONFIG = {
     // Motor Baseline Limits & Normal Operating Thresholds
     baselines: {
         temp: { min: 30.0, max: 40.0, warn: 45.0, critical: 52.0, targetMid: 35.0, unit: '°C' },
-        rpm: { min: 1400, max: 1500, warnDev: 100, criticalDev: 250, targetMid: 1450, unit: 'RPM' },
+        rpm: { min: 500, max: 600, warnDev: 60, criticalDev: 150, targetMid: 550, unit: 'RPM' },
         current: { min: 1.50, max: 3.00, warn: 3.50, critical: 4.20, targetMid: 2.25, unit: 'A' },
         voltage: { min: 11.5, max: 12.6, targetMid: 12.1, unit: 'V' },
         vibration: { min: 1.00, max: 1.80, warn: 2.30, critical: 3.20, targetMid: 1.40, unit: 'g RMS' },
@@ -896,7 +896,7 @@ function saveCustomThresholds() {
     const tempLimit = parseFloat(document.getElementById('input-thresh-temp').value) || 45.0;
     const vibLimit = parseFloat(document.getElementById('input-thresh-vib').value) || 2.30;
     const currentLimit = parseFloat(document.getElementById('input-thresh-current').value) || 3.50;
-    const rpmTarget = parseInt(document.getElementById('input-thresh-rpm').value) || 1450;
+    const rpmTarget = parseInt(document.getElementById('input-thresh-rpm').value) || 550;
     const soundLimit = parseFloat(document.getElementById('input-thresh-sound').value) || 55.0;
 
     CONFIG.baselines.temp.warn = tempLimit;
